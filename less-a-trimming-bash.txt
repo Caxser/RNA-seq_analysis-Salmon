@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# === Configura aquí ===
+INPUT_DIR="/mnt/d/Proyecto-maestria/descargas_sra"      # carpeta con subcarpetas por muestra
+OUTPUT_DIR="/mnt/d/Proyecto-maestria/fastq_clean"       # salidas FASTQ recortados
+REPORT_DIR="/mnt/d/Proyecto-maestria/fastp_reports"     # HTML/JSON de fastp
+THREADS=10                      # hilos por proceso fastp
+MIN_LEN=40                     # longitud mínima tras recorte
+#MEAN_Q=20                      # calidad media (ventana) para recorte
+#WINDOW=4                       # tamaño de ventana para recorte
+# =======================
+
+mkdir -p "$OUTPUT_DIR" "$REPORT_DIR"
+
+# Busca archivos R1. Ajusta patrones si tus nombres son distintos.
+# Patrones comunes: *_R1*.fastq.gz o *_1*.fastq.gz
+mapfile -t R1_LIST < <(find "$INPUT_DIR" -type f \( -iname "*_R1*.fastq.gz" -o -iname "*_1*.fastq.gz" \) | sort)
+
+if [[ ${#R1_LIST[@]} -eq 0 ]]; then
+  echo "No se encontraron archivos R1 en $INPUT_DIR"
+  exit 1
+fi
+
+for R1 in "${R1_LIST[@]}"; do
+  # Construye ruta de R2 reemplazando _R1 por _R2, o _1 por _2
+  if [[ "$R1" == *"_R1"* ]]; then
+    R2="${R1/_R1/_R2}"
+  elif [[ "$R1" == *"_1"* ]]; then
+    R2="${R1/_1/_2}"
+  else
+    echo "No pude inferir R2 para: $R1"
+    continue
+  fi
+
+  if [[ ! -f "$R2" ]]; then
+    echo "ADVERTENCIA: no existe el archivo R2 esperado para $R1"
+    continue
+  fi
+
+  # Nombre de la muestra = nombre de la subcarpeta inmediata
+  SAMPLE="$(basename "$(dirname "$R1")")"
+
+  OUT_SUB="$OUTPUT_DIR/$SAMPLE"
+  mkdir -p "$OUT_SUB"
+
+  OUT_R1="$OUT_SUB/${SAMPLE}_R1.clean.fastq.gz"
+  OUT_R2="$OUT_SUB/${SAMPLE}_R2.clean.fastq.gz"
+  HTML="$REPORT_DIR/${SAMPLE}.fastp.html"
+  JSON="$REPORT_DIR/${SAMPLE}.fastp.json"
+
+  echo ">>> Procesando $SAMPLE"
+  fastp \
+    -i "$R1" -I "$R2" \
+    -o "$OUT_R1" -O "$OUT_R2" \
+    --detect_adapter_for_pe \
+    --length_required "$MIN_LEN" \
+    --trim_poly_g \
+    --thread "$THREADS" \
+    --html "$HTML" --json "$JSON"
+
+done
+
+echo "Listo. FASTQ limpios en: $OUTPUT_DIR ; reportes en: $REPORT_DIR"
+echo "Puedes consolidar reportes con:  multiqc -o qc_multiqc \"$REPORT_DIR\" \"$OUTPUT_DIR\""
