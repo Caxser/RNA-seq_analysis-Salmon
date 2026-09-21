@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Ruta al archivo con los IDs SRA (uno por línea)
+LISTA_IDS="lista_sra.txt"
+
+# Directorio base para guardar los archivos
+DIRECTORIO_SALIDA="./descargas_sra"
+
+# Número de hilos para fasterq-dump
+HILOS=12
+
+# Crear el directorio de salida si no existe
+mkdir -p "$DIRECTORIO_SALIDA"
+
+# Leer cada línea del archivo con IDs
+while IFS= read -r SRA_ID || [ -n "$SRA_ID" ]; do
+    echo "🔄 Procesando: $SRA_ID"
+
+    # Crear subdirectorio para este ID
+    SUBDIR="$DIRECTORIO_SALIDA/$SRA_ID"
+    mkdir -p "$SUBDIR"
+
+    # Descargar .sra
+    echo "📥 Descargando $SRA_ID con prefetch..."
+    prefetch "$SRA_ID" --output-directory "$SUBDIR"
+
+    # Verificar existencia del archivo SRA
+    SRA_FILE="$SUBDIR/$SRA_ID/$SRA_ID.sra"
+    if [[ ! -f "$SRA_FILE" ]]; then
+        SRA_FILE="$SUBDIR/$SRA_ID.sra"
+        [[ ! -f "$SRA_FILE" ]] && echo "❌ No se encontró $SRA_ID.sra" && continue
+    fi
+
+    # Convertir a FASTQ
+    echo "📦 Convirtiendo a FASTQ..."
+    fasterq-dump "$SRA_FILE" -O "$SUBDIR" -e "$HILOS"
+
+    # Comprimir los FASTQ
+    echo "🗜️  Comprimiendo archivos FASTQ..."
+    gzip "$SUBDIR"/*.fastq
+
+    # Eliminar el archivo .sra
+    echo "🧹 Eliminando archivo SRA..."
+    rm -f "$SRA_FILE"
+
+    echo "✅ Completado: $SRA_ID"
+    echo "----------------------------------"
+done < "$LISTA_IDS"
+
+echo "🎉 Proceso finalizado."
